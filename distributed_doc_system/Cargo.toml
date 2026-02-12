@@ -12,3 +12,5 @@ serde_json = "1.0"
 uuid = { version = "1.4", features = ["v4", "serde"] }
 tokio = { version = "1", features = ["full"] }
 rand = "0.8"
+zenoh = "0.7.2"
+futures = "0.3"
