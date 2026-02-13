@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(tag = "type", content = "payload")]  //onfigure le format JSON pour qu'il soit facile à lire par le frontend
+#[serde(tag = "type", content = "payload")]  //configure le format JSON pour qu'il soit facile à lire par le frontend
 
 pub enum ClientMessage {   // Définit strictement les actions possibles de l'utilisateur
     Create { name: String },
