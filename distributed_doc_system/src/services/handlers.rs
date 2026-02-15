@@ -61,11 +61,12 @@ impl Handler<UpdateDoc> for DocServer {
     }
 }
 
-impl Handler<ZenohUpdate> for DocServer {
+// CORRECTION ICI : On utilise NetworkUpdate
+impl Handler<NetworkUpdate> for DocServer {
     type Result = ();
-    fn handle(&mut self, msg: ZenohUpdate, _: &mut Context<Self>) {
+    fn handle(&mut self, msg: NetworkUpdate, _: &mut Context<Self>) {
         if let Ok(remote_doc) = serde_json::from_str::<Document>(&msg.payload) {
-            println!("📥 Reçu via Zenoh (Topic: {}): {} (v{})", msg.key, remote_doc.name, remote_doc.version);
+            println!(" Reçu via le Réseau (Topic: {}): {} (v{})", msg.key, remote_doc.name, remote_doc.version);
             self.repo.docs.insert(remote_doc.doc_id.clone(), remote_doc.clone());
         }
     }
