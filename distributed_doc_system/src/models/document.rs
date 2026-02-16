@@ -46,3 +46,12 @@ impl Repository {   // Initialise le stockage au démarrage du serveur (dans mai
         Self { docs: HashMap::new() }  // Démarre avec une liste vide
     }
 }
+
+// On précise exactement le Context de l'Acteur comme exigé par le compilateur
+impl actix::dev::MessageResponse<crate::services::doc_server::DocServer, crate::models::message::CreateDoc> for Document {
+    fn handle(self, _ctx: &mut <crate::services::doc_server::DocServer as actix::Actor>::Context, tx: Option<actix::dev::OneshotSender<Self>>) {
+        if let Some(tx) = tx {
+            let _ = tx.send(self);
+        }
+    }
+}

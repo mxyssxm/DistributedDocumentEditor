@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Éditeur REST + Zenoh</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="sidebar">
+    <h3>Mes Documents</h3>
+    <div class="controls">
+        <input type="text" id="newDocName" placeholder="Nouveau document...">
+        <button onclick="createDoc()">Créer</button>
+    </div>
+    <ul id="docList"></ul>
+</div>
+
+<div id="main">
+    <div class="header">
+        <h2 id="currentDocTitle">Sélectionnez un document</h2>
+        <span id="status" class="status">Connecté (API REST)</span>
+    </div>
+    
+    <div id="error-box" class="error"></div>
+    
+    <textarea id="editor" disabled oninput="onEdit()" placeholder="Le contenu apparaîtra ici..."></textarea>
+    
+    <div class="footer">
+        Architecture: REST API + Zenoh Sync | Version: <span id="version-display">0</span>
+    </div>
+</div>
+
+<script>
+    let activeDocId = null;
+    let currentVersion = 0;
+
+    // Récupérer la liste des documents
+    async function fetchDocsList() {
+        const res = await fetch('/api/docs');
+        const docs = await res.json();
+        const list = document.getElementById("docList");
+        list.innerHTML = "";
+        docs.forEach(doc => addDocToList(doc.doc_id, doc.name));
+    }
+
+    // Récupérer un document précis
+    async function fetchDoc(id) {
+        const res = await fetch(`/api/docs/${id}`);
+        if (res.ok) {
+            const doc = await res.json();
+            if (activeDocId === doc.doc_id) {
+                const editor = document.getElementById("editor");
+                // Mettre à jour seulement s'il y a une nouvelle version depuis le serveur
+                if (editor.value !== doc.content && currentVersion < doc.version) {
+                    editor.value = doc.content;
+                }
+                currentVersion = doc.version;
+                document.getElementById("version-display").innerText = currentVersion;
+            }
+        }
+    }
+
+    function addDocToList(doc_id, name) {
+        const li = document.createElement("li");
+        li.innerText = name;
+        li.onclick = () => joinDoc(doc_id, name);
+        document.getElementById("docList").appendChild(li);
+    }
+
+    async function createDoc() {
+        const name = document.getElementById("newDocName").value;
+        if(name) {
+            await fetch('/api/docs', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ name })
+            });
+            document.getElementById("newDocName").value = "";
+            fetchDocsList();
+        }
+    }
+
+    function joinDoc(doc_id, name) {
+        activeDocId = doc_id;
+        document.getElementById("currentDocTitle").innerText = name;
+        document.getElementById("editor").disabled = false;
+        fetchDoc(doc_id);
+    }
+
+    // Envoyer une modification
+    async function onEdit() {
+        const content = document.getElementById("editor").value;
+        document.getElementById("status").innerText = "Enregistrement...";
+        document.getElementById("status").style.color = "orange";
+        
+        const res = await fetch(`/api/docs/${activeDocId}`, {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ content, version: currentVersion })
+        });
+
+        if (res.ok) {
+            const doc = await res.json();
+            currentVersion = doc.version;
+            document.getElementById("status").innerText = "Synchronisé";
+            document.getElementById("status").style.color = "green";
+            document.getElementById("error-box").innerText = "";
+        } else {
+            document.getElementById("status").innerText = "Conflit !";
+            document.getElementById("status").style.color = "red";
+            document.getElementById("error-box").innerText = await res.text();
+            fetchDoc(activeDocId); // Force le rechargement en cas d'erreur
+        }
+    }
+
+    // Le "Polling" (Interroger le serveur toutes les secondes pour voir les nouveautés de Zenoh)
+    setInterval(() => {
+        fetchDocsList();
+        if (activeDocId) {
+            fetchDoc(activeDocId);
+        }
+    }, 1000);
+
+    // Chargement initial
+    fetchDocsList();
+</script>
+</body>
+</html>

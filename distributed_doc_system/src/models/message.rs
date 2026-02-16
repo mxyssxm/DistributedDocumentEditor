@@ -1,5 +1,5 @@
 use actix::prelude::*;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use crate::models::document::Document;
 
 // --- DTOs pour les requêtes HTTP (Navigateur -> Serveur) ---

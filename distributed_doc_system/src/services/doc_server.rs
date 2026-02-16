@@ -9,12 +9,12 @@ pub struct DocServer {
     pub(crate) repo: Repository,
     // La connexion au "Pub/Sub" 
     // L'utilisation de Arc<Session> garantit la continuation et gerer les conflits.
-    pub(crate) zenoh_session: Arc<Session>,
+    pub(crate) network_session: Arc<Session>,
 }
 
 impl DocServer {
     // Fonction appelée une seule fois au démarrage de l'application
-    pub fn new(zenoh_session: Arc<Session>) -> Self {
+    pub fn new(network_session: Arc<Session>) -> Self {
         Self {
             // Initialise une base de données vide
             repo: Repository::new(),
