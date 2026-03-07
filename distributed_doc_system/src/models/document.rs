@@ -7,47 +7,64 @@ pub struct Document {
     pub name: String,
     pub content: String,
     pub version: usize,
+    pub winning_client_id: String,
+    pub last_base_version: usize,
 }
 
-impl Document {    // Constructeur pour Crée un nouveau document vide.
-    // Appelé quand le serveur reçoit le message ClientMessage::Create.
-    pub fn new(name: String) -> Self {
+impl Document {    
+    pub fn new(name: String, client_id: String) -> Self {
         Self {
             doc_id: uuid::Uuid::new_v4().to_string(), 
             name,
-            content: String::new(),    // Commence vide.
-            version: 0,                // Commence à la version 0.
+            content: String::new(),
+            version: 0,
+            winning_client_id: client_id,
+            last_base_version: 0,
         }
     }
 
-    pub fn update(&mut self, new_content: String, base_version: usize) -> Result<usize, String> {
-        // VÉRIFICATION DE CONFLIT 
-        // On compare la version que le client PENSE avoir (base_version)
-        // avec la version RÉELLE du serveur (self.version).
-        
-        if base_version != self.version {
-            return Err("Conflit : Version obsolète.".to_string()); // On refuse la mise à jour pour ne pas écraser le travail de l'autre.
+    /// Règle métier : Résolution des conflits par ordre lexicographique.
+    /// Rejette la mise à jour si la priorité du client est insuffisante.
+    pub fn apply_update(&mut self, new_content: String, request_version: usize, client_id: String) -> Result<usize, String> {
+        // Cas 1 : Suite logique normale
+        if request_version == self.version {
+            self.execute_modification(new_content, client_id);
+            return Ok(self.version);
         }
-        // SUCCÈS : Les versions correspondent.
-        self.content = new_content;  // 1. On applique le nouveau texte.
-        self.version += 1;  // 2. On incrémente la version locale
-        Ok(self.version) // On retourne la nouvelle version pour confirmer le succès
+        
+        // Cas 2 : Conflit concurrent (Deux clients modifient la même base)
+        if request_version == self.last_base_version {
+            if client_id < self.winning_client_id {
+                self.execute_modification(new_content, client_id);
+                return Ok(self.version);
+            } else {
+                return Err("Conflit : Priorité lexicographique insuffisante.".to_string());
+            }
+        }
+
+        // Cas 3 : Version totalement obsolète
+        Err("Conflit : Version obsolète.".to_string())
+    }
+
+    
+    fn execute_modification(&mut self, new_content: String, client_id: String) {
+        self.last_base_version = self.version;
+        self.content = new_content;
+        self.version += 1;
+        self.winning_client_id = client_id;
     }
 }
 
 pub struct Repository {
-    // La clé de la Map est le doc_id
-    // Valeur (Document)
     pub docs: HashMap<String, Document>,
 }
 
-impl Repository {   // Initialise le stockage au démarrage du serveur (dans main.rs)
+impl Repository {
     pub fn new() -> Self {
-        Self { docs: HashMap::new() }  // Démarre avec une liste vide
+        Self { docs: HashMap::new() }
     }
 }
 
-// On précise exactement le Context de l'Acteur comme exigé par le compilateur
 impl actix::dev::MessageResponse<crate::services::doc_server::DocServer, crate::models::message::CreateDoc> for Document {
     fn handle(self, _ctx: &mut <crate::services::doc_server::DocServer as actix::Actor>::Context, tx: Option<actix::dev::OneshotSender<Self>>) {
         if let Some(tx) = tx {

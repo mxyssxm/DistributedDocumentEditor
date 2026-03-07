@@ -6,14 +6,14 @@ use std::collections::HashMap;
 enum DocMessage {
     Create { client_id: String, doc_id: String, content: String },
     Update { client_id: String, old_version: String, new_version: String, content: String },
+    Notify { doc_id: String, content: String }, 
 }
-
 
 struct DocState {
     current_version: String,
     content: String,
     winning_client: String, 
-    update_count: u32,
+    last_base_version: String, //  Permet de suivre l'historique pour les versions 1.2, 1.3, etc.
 }
 
 #[tokio::main]
@@ -22,8 +22,6 @@ async fn main() {
     
     let session = zenoh::open(Config::default()).await.unwrap();
     let subscriber = session.declare_subscriber("reseau/documents").await.unwrap();
-    
-    // Le "disque dur" de notre serveur pour stocker les documents
     let mut documents: HashMap<String, DocState> = HashMap::new();
 
     println!(" [SERVEUR] En attente de documents...\n");
@@ -34,15 +32,17 @@ async fn main() {
         if let Ok(msg) = serde_json::from_str::<DocMessage>(&payload_str) {
             match msg {
                 DocMessage::Create { client_id, doc_id, content } => {
-                    println!("📥 [CRÉATION par {}] ID: {} | Contenu: '{}'", client_id, doc_id, content);
+                    println!(" [CRÉATION par {}] ID: {} | Contenu: '{}'", client_id, doc_id, content);
                     
-                    // On sauvegarde le document et on définit le créateur comme gagnant initial
                     documents.insert(doc_id.clone(), DocState {
-                        current_version: doc_id,
-                        content,
-                        winning_client: client_id,
-                        update_count: 0,
+                        current_version: doc_id.clone(),
+                        content: content.clone(),
+                        winning_client: client_id.clone(),
+                        last_base_version: String::new(),
                     });
+
+                    let notif = DocMessage::Notify { doc_id: doc_id.clone(), content: content.clone() };
+                    session.put("reseau/notifications", serde_json::to_string(&notif).unwrap()).await.unwrap();
                 },
                 
                 DocMessage::Update { client_id, old_version, new_version, content } => {
@@ -50,32 +50,47 @@ async fn main() {
                     println!("📥 [UPDATE reçu de {}] {} -> {}", client_id, old_version, new_version);
 
                     if let Some(state) = documents.get_mut(&base_doc_id) {
-                        state.update_count += 1;
-
-                        // 
-                        if state.update_count > 1 {
-                            println!("   ⚠️ [ALERTE CONCURRENCE] Il y a plus d'une mise à jour sur le doc_id '{}' !", base_doc_id);
+                        
+                        // CAS 1 : C'est une suite logique normale (ex: on passe de 1.1 à 1.2)
+                        if old_version == state.current_version {
+                            println!("    ✅ [SUCCÈS] Mise à jour séquentielle acceptée.");
                             
-                            // Règle déterministe : Ordre lexicographique (Client_1 < Client_2)
-                            if client_id <= state.winning_client {
-                                println!("    [RÉSOLUTION] L'ID '{}' gagne (Priorité haute). Mise à jour ACCEPTÉE.", client_id);
-                                state.current_version = new_version;
-                                state.content = content;
-                                state.winning_client = client_id.clone();
-                            } else {
-                                println!("    [RÉSOLUTION] L'ID '{}' perd face à '{}' (Priorité faible). Mise à jour REJETÉE.", client_id, state.winning_client);
-                            }
-                        } else {
-                            
-                            state.current_version = new_version;
-                            state.content = content;
+                            state.last_base_version = state.current_version.clone();
+                            state.current_version = new_version.clone();
+                            state.content = content.clone();
                             state.winning_client = client_id.clone();
-                            println!("    [SUCCÈS] Première mise à jour acceptée.");
+
+                            let notif = DocMessage::Notify { doc_id: new_version, content };
+                            session.put("reseau/notifications", serde_json::to_string(&notif).unwrap()).await.unwrap();
+                        
+                        // CAS 2 : Conflit Concurrent ! Deux clients ont travaillé sur la même base.
+                        } else if old_version == state.last_base_version {
+                            println!("   ⚠️ [ALERTE CONCURRENCE] Modification concurrente détectée sur la base '{}' !", old_version);
+                            
+                            
+                            if client_id < state.winning_client {
+                                println!("    ✅ [RÉSOLUTION] L'ID '{}' a un rang supérieur. Il ÉCRASE la version de '{}'.", client_id, state.winning_client);
+                                
+                                state.current_version = new_version.clone();
+                                state.content = content.clone();
+                                state.winning_client = client_id.clone();
+                                //  le Client 1 écrase le texte du Client 2 !
+                                let notif = DocMessage::Notify { doc_id: new_version, content };
+                                session.put("reseau/notifications", serde_json::to_string(&notif).unwrap()).await.unwrap();
+                            } else {
+                                println!("    ❌ [RÉSOLUTION] L'ID '{}' perd face à '{}' (Priorité faible). REJETÉ.", client_id, state.winning_client);
+                            }
+                        
+                        // CAS 3 : La version du client est complètement dépassée
+                        } else {
+                            println!("    ❌ [ERREUR] Trop tard ! Le document est déjà à la version '{}'.", state.current_version);
                         }
+
                     } else {
                         println!("   ⚠️ [ERREUR] Le document '{}' n'existe pas.", base_doc_id);
                     }
-                }
+                },
+                DocMessage::Notify { .. } => {}
             }
         }
     }

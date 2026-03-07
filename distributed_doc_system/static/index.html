@@ -33,9 +33,8 @@
 
 <script>
     let activeDocId = null;
-    let currentVersion = 0;
+    let currentVersion = -1; // 🌟 AJOUT : On commence à -1 pour forcer la première mise à jour
 
-    // Récupérer la liste des documents
     async function fetchDocsList() {
         const res = await fetch('/api/docs');
         const docs = await res.json();
@@ -44,19 +43,19 @@
         docs.forEach(doc => addDocToList(doc.doc_id, doc.name));
     }
 
-    // Récupérer un document précis
     async function fetchDoc(id) {
         const res = await fetch(`/api/docs/${id}`);
         if (res.ok) {
             const doc = await res.json();
             if (activeDocId === doc.doc_id) {
                 const editor = document.getElementById("editor");
-                // Mettre à jour seulement s'il y a une nouvelle version depuis le serveur
-                if (editor.value !== doc.content && currentVersion < doc.version) {
+                
+                // 🌟 CORRECTION DU BUG : On met à jour si la version change ou si on vient de cliquer (-1)
+                if (currentVersion < doc.version || currentVersion === -1) {
                     editor.value = doc.content;
+                    currentVersion = doc.version;
+                    document.getElementById("version-display").innerText = currentVersion;
                 }
-                currentVersion = doc.version;
-                document.getElementById("version-display").innerText = currentVersion;
             }
         }
     }
@@ -85,10 +84,14 @@
         activeDocId = doc_id;
         document.getElementById("currentDocTitle").innerText = name;
         document.getElementById("editor").disabled = false;
+        
+        // 🌟 LE CORRECTIF MAGIQUE EST LÀ : On efface la mémoire du navigateur quand on change de document !
+        currentVersion = -1; 
+        document.getElementById("editor").value = "Chargement...";
+        
         fetchDoc(doc_id);
     }
 
-    // Envoyer une modification
     async function onEdit() {
         const content = document.getElementById("editor").value;
         document.getElementById("status").innerText = "Enregistrement...";
@@ -110,11 +113,11 @@
             document.getElementById("status").innerText = "Conflit !";
             document.getElementById("status").style.color = "red";
             document.getElementById("error-box").innerText = await res.text();
-            fetchDoc(activeDocId); // Force le rechargement en cas d'erreur
+            currentVersion = -1; // Force la recharge en cas de conflit
+            fetchDoc(activeDocId);
         }
     }
 
-    // Le "Polling" (Interroger le serveur toutes les secondes pour voir les nouveautés de Zenoh)
     setInterval(() => {
         fetchDocsList();
         if (activeDocId) {
@@ -122,7 +125,6 @@
         }
     }, 1000);
 
-    // Chargement initial
     fetchDocsList();
 </script>
 </body>

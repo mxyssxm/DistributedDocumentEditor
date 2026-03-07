@@ -3,11 +3,12 @@ use tokio::io::{self, AsyncBufReadExt, BufReader};
 use zenoh::Config;
 use serde::{Serialize, Deserialize};
 
-
 #[derive(Serialize, Deserialize, Debug)]
 enum DocMessage {
     Create { client_id: String, doc_id: String, content: String },
     Update { client_id: String, old_version: String, new_version: String, content: String },
+    /// Notification diffusée par le serveur une fois le conflit résolu (Modèle Publish/Subscribe)
+    Notify { doc_id: String, content: String }, 
 }
 
 #[tokio::main]
@@ -15,42 +16,28 @@ async fn main() {
     let args: Vec<String> = env::args().collect();
     let id = if args.len() > 1 { args[1].clone() } else { "Client_Anonyme".to_string() };
 
-    println!(" [{}] Nœud Client prêt ", id);
+    println!(" [{}] Nœud Client prêt", id);
     let session = zenoh::open(Config::default()).await.unwrap();
 
-    
     let sub_session = session.clone();
-    let sub_id = id.clone();
     
+    // On écoute UNIQUEMENT les notifications validées par le serveur
     tokio::spawn(async move {
-        let subscriber = sub_session.declare_subscriber("reseau/documents").await.unwrap();
+        let subscriber = sub_session.declare_subscriber("reseau/notifications").await.unwrap();
         while let Ok(sample) = subscriber.recv_async().await {
-            
             let payload_str = String::from_utf8_lossy(&sample.payload().to_bytes()).to_string();
             
-            // On décode le JSON
             if let Ok(msg) = serde_json::from_str::<DocMessage>(&payload_str) {
-                match msg {
-                    DocMessage::Create { client_id, doc_id, content } => {
-                        if client_id != sub_id { 
-                            println!("\n🔔 [NOTIFICATION] {} a créé un document :", client_id);
-                            println!("    doc_id: {}", doc_id);
-                            println!("    doc_content: \"{}\"", content);
-                        }
-                    },
-                    DocMessage::Update { client_id, old_version: _, new_version, content } => {
-                        if client_id != sub_id {
-                            println!("\n🔔 [NOTIFICATION] {} a mis à jour un document :", client_id);
-                            println!("    doc_id (new version): {}", new_version);
-                            println!("    doc_new_content: \"{}\"", content);
-                        }
-                    }
+                //  doc_id et doc_content
+                if let DocMessage::Notify { doc_id, content } = msg {
+                    println!("\n [NOTIFICATION] Mise à jour validée par le réseau !");
+                    println!("    doc_id: {}", doc_id);
+                    println!("    doc_content: \"{}\"", content);
                 }
             }
         }
     });
 
-    
     let mut reader = BufReader::new(io::stdin());
     let mut line = String::new();
 
@@ -69,7 +56,7 @@ async fn main() {
 
         if parts[0] == "create" && parts.len() >= 3 {
             let doc_id = parts[1].to_string();
-            let content = parts[2..].join(" ").replace("\"", ""); // On recolle le texte et on enlève les guillemets
+            let content = parts[2..].join(" ").replace("\"", "");
             
             let msg = DocMessage::Create { client_id: id.clone(), doc_id, content };
             let payload = serde_json::to_string(&msg).unwrap();
@@ -85,7 +72,7 @@ async fn main() {
             session.put("reseau/documents", payload).await.unwrap();
             
         } else {
-            println!(" Commande non reconnue. Vérifiez la syntaxe.");
+            println!("❌ Commande non reconnue. Vérifiez la syntaxe.");
         }
     }
 }
