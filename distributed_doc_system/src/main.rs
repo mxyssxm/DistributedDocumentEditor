@@ -61,7 +61,7 @@ fn main() -> std::io::Result<()> {
                 .service(fs::Files::new("/", "./static").index_file("index.html"))
         })
         .listen(listener)? // On utilise le "listener" au lieu de "bind"
-        .run()
+        .run() //ici on utilise run()
         .await
     })
 }
